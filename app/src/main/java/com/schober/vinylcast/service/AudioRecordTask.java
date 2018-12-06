@@ -42,8 +42,22 @@ public class AudioRecordTask implements Runnable {
     private PipedInputStream musicDetectInputStream;
     private GnMusicIdStream musicIdStream;
     private Thread musicDetectThread;
+    private boolean musicRecognition = false;
+
+    public AudioRecordTask() {
+        Log.d(TAG, "AudioRecordTask - BufferSize: " + MIN_RAW_BUFFER_SIZE);
+
+        this.audioRecord = new AudioRecord(
+                AUDIO_SOURCE,
+                AUDIO_SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_STEREO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                MIN_RAW_BUFFER_SIZE);
+
+    }
 
     public AudioRecordTask(GnMusicIdStream musicIdStream) {
+        musicRecognition = true;
         Log.d(TAG, "AudioRecordTask - BufferSize: " + MIN_RAW_BUFFER_SIZE);
         this.musicIdStream = musicIdStream;
 
@@ -65,9 +79,10 @@ public class AudioRecordTask implements Runnable {
         try {
             this.rawAudioInputStream = new PipedInputStream(MIN_RAW_BUFFER_SIZE);
             this.rawAudioOutputStream = new PipedOutputStream(rawAudioInputStream);
-
-            this.musicDetectInputStream = new PipedInputStream(MIN_RAW_BUFFER_SIZE);
-            this.musicDetectOutputStream = new PipedOutputStream(musicDetectInputStream);
+            if (musicRecognition) {
+                this.musicDetectInputStream = new PipedInputStream(MIN_RAW_BUFFER_SIZE);
+                this.musicDetectOutputStream = new PipedOutputStream(musicDetectInputStream);
+            }
 
             return this.rawAudioInputStream;
         } catch (IOException e) {
@@ -89,36 +104,60 @@ public class AudioRecordTask implements Runnable {
         Log.d(TAG, "starting...");
 
         audioRecord.startRecording();
-        musicDetectThread.start();
+        if (musicRecognition) {
+            musicDetectThread.start();
+        }
 
         byte[] buffer = new byte[MIN_RAW_BUFFER_SIZE];
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                int bufferReadResult = audioRecord.read(buffer, 0, buffer.length);
-                if (bufferReadResult > 0) {
-                    rawAudioOutputStream.write(buffer, 0, bufferReadResult);
-                    rawAudioOutputStream.flush();
+        if (musicRecognition) {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    int bufferReadResult = audioRecord.read(buffer, 0, buffer.length);
+                    if (bufferReadResult > 0) {
+                        rawAudioOutputStream.write(buffer, 0, bufferReadResult);
+                        rawAudioOutputStream.flush();
                     musicDetectOutputStream.write(buffer, 0, bufferReadResult);
                     musicDetectOutputStream.flush();
+                    }
+                } catch (InterruptedIOException e) {
+                    Log.d(TAG, "interrupted");
+                    break;
+                } catch (IOException e) {
+                    Log.e(TAG, "Exception writing audio output", e);
+                    break;
                 }
-            } catch (InterruptedIOException e) {
-                Log.d(TAG, "interrupted");
-                break;
-            } catch (IOException e) {
-                Log.e(TAG, "Exception writing audio output", e);
-                break;
+            }
+        } else {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    int bufferReadResult = audioRecord.read(buffer, 0, buffer.length);
+                    if (bufferReadResult > 0) {
+                        rawAudioOutputStream.write(buffer, 0, bufferReadResult);
+                        rawAudioOutputStream.flush();
+                    }
+                } catch (InterruptedIOException e) {
+                    Log.d(TAG, "interrupted");
+                    break;
+                } catch (IOException e) {
+                    Log.e(TAG, "Exception writing audio output", e);
+                    break;
+                }
             }
         }
 
         Log.d(TAG, "stopping...");
-        if (musicDetectThread != null) {
-            musicDetectThread.interrupt();
+        if (musicRecognition) {
+            if (musicDetectThread != null) {
+                musicDetectThread.interrupt();
+            }
         }
         audioRecord.stop();
         audioRecord.release();
         try {
             rawAudioOutputStream.close();
-            musicDetectOutputStream.close();
+            if (musicRecognition) {
+                musicDetectOutputStream.close();
+            }
         } catch (IOException e) {
             Log.e(TAG, "Exception closing streams", e);
         }

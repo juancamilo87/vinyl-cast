@@ -20,12 +20,14 @@ import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.app.MediaRouteChooserDialogFragment;
 import android.support.v7.app.MediaRouteDialogFactory;
+import android.support.v7.widget.SwitchCompat;
 import android.util.Log;
 import android.view.Menu;
 import android.view.View;
 import android.view.animation.Animation;
 import android.view.animation.LinearInterpolator;
 import android.view.animation.RotateAnimation;
+import android.widget.CompoundButton;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -45,6 +47,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
     private static final int RECORD_REQUEST_CODE = 1;
+    public static final String MUSIC_RECOGNITION = "music_recognition";
 
     private TextView statusText;
     private TextView albumTextView;
@@ -75,6 +78,21 @@ public class MainActivity extends AppCompatActivity {
         albumTextView = (TextView) findViewById(R.id.albumName);
         trackTextView = (TextView) findViewById(R.id.trackTitle);
         artistTextView = (TextView) findViewById(R.id.artistName);
+
+        // switch to enable or disable music recognition
+        SwitchCompat musicRecognitionSwitch = (SwitchCompat)
+                findViewById(R.id.music_recognition_switch);
+        musicRecognitionSwitch.setChecked(getPreferences(Context.MODE_PRIVATE)
+                .getBoolean(MUSIC_RECOGNITION, false));
+        musicRecognitionSwitch.setOnCheckedChangeListener(
+                new CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
+                        getPreferences(Context.MODE_PRIVATE).edit()
+                                .putBoolean(MUSIC_RECOGNITION, b).apply();
+                    }
+                }
+        );
 
         // button to initialize audio
         startRecordingButton = (ImageButton) findViewById(R.id.startRecordingButton);

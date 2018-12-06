@@ -1,5 +1,6 @@
 package com.schober.vinylcast.service;
 
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.BitmapDrawable;
 import android.os.Binder;
@@ -66,6 +67,8 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
     private Timer musicRecognizerTimer = new Timer();
     private MainActivity activity;
 
+    private boolean musicRecognition = false;
+
     /**
      * Class used for the client Binder.  Because we know this service always
      * runs in the same process as its clients, we don't need to deal with IPC.
@@ -73,8 +76,13 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
     public class MediaRecorderBinder extends Binder {
 
         public void setActivity(MainActivity activity) {
-            MediaRecorderService.this.activity = activity;
-            musicRecognizer = new MusicRecognizer(MediaRecorderService.this, activity);
+            musicRecognition = activity.getPreferences(Context.MODE_PRIVATE)
+                    .getBoolean(MainActivity.MUSIC_RECOGNITION, false);
+            if (musicRecognition) {
+                musicRecognizer = new MusicRecognizer(MediaRecorderService.this, activity);
+            } else {
+                MediaRecorderService.this.activity = activity;
+            }
             activity.setStatus("" , true);
             start();
         }
@@ -99,7 +107,9 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
         }
 
         public void loadAndDisplayCoverArt(String coverArtUrl, ImageView imageView) {
-            musicRecognizer.loadAndDisplayCoverArt(coverArtUrl, imageView);
+            if (musicRecognition) {
+                musicRecognizer.loadAndDisplayCoverArt(coverArtUrl, imageView);
+            }
         }
     }
 
@@ -191,7 +201,9 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
         Log.i(TAG, "Start");
         startRecording();
         startHttpServer();
-        startMusicRecognition();
+        if (musicRecognition) {
+            startMusicRecognition();
+        }
         castMedia();
         mediaSession.setPlaybackState(new PlaybackStateCompat.Builder()
                 .setState(PlaybackStateCompat.STATE_PLAYING, 0, 0.0f)
@@ -221,7 +233,9 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
                 .setState(PlaybackStateCompat.STATE_STOPPED, 0, 0.0f)
                 .setActions(PlaybackStateCompat.ACTION_PLAY).build());
         mediaSession.setActive(false);
-        stopMusicRecognition();
+        if (musicRecognition) {
+            stopMusicRecognition();
+        }
         stopRecording();
         stopHttpServer();
         stopForeground(true);
@@ -229,7 +243,11 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
     }
 
     private void startRecording() {
-        audioRecordTask = new AudioRecordTask(musicRecognizer.getGnMusicIdStream());
+        if (musicRecognition) {
+            audioRecordTask = new AudioRecordTask(musicRecognizer.getGnMusicIdStream());
+        } else {
+            audioRecordTask = new AudioRecordTask();
+        }
         ConvertAudioTask convertAudioTask = new ConvertAudioTask();
 
         convertedAudioInputStream = convertAudioTask.getConvertedInputStream(
