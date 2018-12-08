@@ -8,26 +8,26 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Process;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.app.FragmentManager;
-import android.support.v4.content.ContextCompat;
-import android.support.v7.app.AlertDialog;
-import android.support.v7.app.AppCompatActivity;
-import android.support.v7.app.MediaRouteChooserDialogFragment;
-import android.support.v7.app.MediaRouteDialogFactory;
-import android.support.v7.widget.SwitchCompat;
+
+import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
+import androidx.fragment.app.FragmentManager;
+import androidx.core.content.ContextCompat;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.mediarouter.app.MediaRouteChooserDialogFragment;
+import androidx.mediarouter.app.MediaRouteDialogFactory;
 import android.util.Log;
 import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.animation.Animation;
 import android.view.animation.LinearInterpolator;
 import android.view.animation.RotateAnimation;
-import android.widget.CompoundButton;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -38,16 +38,12 @@ import com.google.android.gms.cast.framework.CastSession;
 import com.google.android.gms.cast.framework.Session;
 import com.google.android.gms.cast.framework.SessionManager;
 import com.google.android.gms.cast.framework.SessionManagerListener;
-import com.gracenote.gnsdk.GnAlbum;
-import com.gracenote.gnsdk.GnException;
-import com.gracenote.gnsdk.GnImageSize;
 import com.schober.vinylcast.service.MediaRecorderService;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
     private static final int RECORD_REQUEST_CODE = 1;
-    public static final String MUSIC_RECOGNITION = "music_recognition";
 
     private TextView statusText;
     private TextView albumTextView;
@@ -70,32 +66,19 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        Toolbar myToolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(myToolbar);
 
         castSessionManager = CastContext.getSharedInstance(this).getSessionManager();
 
-        statusText = (TextView) findViewById(R.id.statusText);
-        coverArtImage = (ImageView) findViewById(R.id.coverArtImage);
-        albumTextView = (TextView) findViewById(R.id.albumName);
-        trackTextView = (TextView) findViewById(R.id.trackTitle);
-        artistTextView = (TextView) findViewById(R.id.artistName);
-
-        // switch to enable or disable music recognition
-        SwitchCompat musicRecognitionSwitch = (SwitchCompat)
-                findViewById(R.id.music_recognition_switch);
-        musicRecognitionSwitch.setChecked(getPreferences(Context.MODE_PRIVATE)
-                .getBoolean(MUSIC_RECOGNITION, false));
-        musicRecognitionSwitch.setOnCheckedChangeListener(
-                new CompoundButton.OnCheckedChangeListener() {
-                    @Override
-                    public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
-                        getPreferences(Context.MODE_PRIVATE).edit()
-                                .putBoolean(MUSIC_RECOGNITION, b).apply();
-                    }
-                }
-        );
+        statusText = findViewById(R.id.statusText);
+        coverArtImage = findViewById(R.id.coverArtImage);
+        albumTextView = findViewById(R.id.albumName);
+        trackTextView = findViewById(R.id.trackTitle);
+        artistTextView = findViewById(R.id.artistName);
 
         // button to initialize audio
-        startRecordingButton = (ImageButton) findViewById(R.id.startRecordingButton);
+        startRecordingButton = findViewById(R.id.startRecordingButton);
         startRecordingButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -130,6 +113,19 @@ public class MainActivity extends AppCompatActivity {
         getMenuInflater().inflate(R.menu.main, menu);
         CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), menu, R.id.media_route_menu_item);
         return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
+
+        if (id == R.id.action_preferences) {
+            // launch settings activity
+            startActivity(new Intent(MainActivity.this, PreferencesActivity.class));
+            return true;
+        }
+
+        return super.onOptionsItemSelected(item);
     }
 
     @Override
@@ -291,51 +287,14 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Adds the provided album as a new row on the application display
-     * @throws GnException
      */
-    private String currentTrack;
-    private String currentAlbum;
-    private String currentArtist;
-
-    public void updateMetaDataFields(final GnAlbum album) throws GnException {
-        String trackTitle = "";
-        if (album.trackMatched() != null) {
-            trackTitle = album.trackMatched().title().display();
-        }
-        String albumTitle = album.title().display();
-        String artist = album.trackMatched().artist().name().display();
-        //use album artist if track artist not available
-        if (artist.isEmpty()) {
-            artist = album.artist().name().display();
-        }
-
-        currentTrack = trackTitle;
-        currentAlbum = albumTitle;
-        currentArtist = artist;
-
-        if (album == null) {
-            //coverArtImage.setVisibility(View.GONE);
-            //albumTextView.setVisibility(View.GONE);
-            //trackTextView.setVisibility(View.GONE);
-            // Use the artist text field to display the error message
-            //artistText.setText("Music Not Identified");
-        } else {
-            // populate the display tow with metadata and cover art
-            albumTextView.setText(albumTitle);
-            artistTextView.setText(artist);
-            trackTextView.setText(trackTitle);
-
-            String coverArtUrl = album.coverArt().asset(GnImageSize.kImageSizeSmall).url();
-
-            binder.updateMetadata(trackTitle, albumTitle, artist, null);
-            binder.loadAndDisplayCoverArt(coverArtUrl, coverArtImage);
-        }
+    public void updateMetaDataFields(String albumTitle, String trackTitle, String artist) {
+        albumTextView.setText(albumTitle);
+        artistTextView.setText(artist);
+        trackTextView.setText(trackTitle);
     }
 
-    public void setCoverArt(Drawable coverArt, ImageView coverArtImage){
-        if (coverArt instanceof BitmapDrawable) {
-            binder.updateMetadata(currentTrack, currentAlbum, currentArtist, (BitmapDrawable) coverArt);
-        }
+    public void setCoverArt(Drawable coverArt){
         runOnUiThread(new SetCoverArtRunnable(coverArt, coverArtImage));
     }
 

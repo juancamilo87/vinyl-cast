@@ -1,21 +1,21 @@
 package com.schober.vinylcast.service;
 
-import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.BitmapDrawable;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import android.support.v4.media.MediaBrowserCompat;
-import android.support.v4.media.MediaBrowserServiceCompat;
+import androidx.media.MediaBrowserServiceCompat;
 import android.support.v4.media.MediaMetadataCompat;
-import android.support.v4.media.session.MediaButtonReceiver;
+import androidx.media.session.MediaButtonReceiver;
+import androidx.preference.PreferenceManager;
+
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
-import android.widget.ImageView;
 
 import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaMetadata;
@@ -25,23 +25,23 @@ import com.google.android.gms.cast.framework.Session;
 import com.google.android.gms.cast.framework.SessionManager;
 import com.google.android.gms.cast.framework.SessionManagerListener;
 import com.google.android.gms.cast.framework.media.RemoteMediaClient;
-import com.schober.vinylcast.MusicRecognizer;
+import com.schober.vinylcast.MediaRecorderServiceListener;
+import com.schober.vinylcast.MusicRecognizerProxy;
 import com.schober.vinylcast.utils.Helpers;
 import com.schober.vinylcast.MainActivity;
 import com.schober.vinylcast.StreamHttpServer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.function.Consumer;
 
 public class MediaRecorderService extends MediaBrowserServiceCompat {
     private static final String TAG = "MediaRecorderService";
 
     private static final int NOTIFICATION_ID = 321;
 
-    private static final int MUSIC_RECOGNIZE_INTERVAL = 10000;
 
     public static final String REQUEST_TYPE = "REQUEST_TYPE";
     public static final String REQUEST_TYPE_START = "REQUEST_TYPE_START";
@@ -63,11 +63,7 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
     private CastSession castSession;
     private SessionManagerListener sessionManagerListener;
 
-    private MusicRecognizer musicRecognizer;
-    private Timer musicRecognizerTimer = new Timer();
-    private MainActivity activity;
-
-    private boolean musicRecognition = false;
+    private List<MediaRecorderServiceListener> listeners = new ArrayList<>();
 
     /**
      * Class used for the client Binder.  Because we know this service always
@@ -76,41 +72,33 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
     public class MediaRecorderBinder extends Binder {
 
         public void setActivity(MainActivity activity) {
-            musicRecognition = activity.getPreferences(Context.MODE_PRIVATE)
-                    .getBoolean(MainActivity.MUSIC_RECOGNITION, false);
-            if (musicRecognition) {
-                musicRecognizer = new MusicRecognizer(MediaRecorderService.this, activity);
-            } else {
-                MediaRecorderService.this.activity = activity;
+            boolean musicRecognitionEnabled = PreferenceManager.getDefaultSharedPreferences(activity)
+                    .getBoolean("music_recognition", false);
+            if (musicRecognitionEnabled) {
+                listeners.add(new MusicRecognizerProxy(MediaRecorderService.this, activity));
             }
             activity.setStatus("" , true);
             start();
         }
+    }
 
-        public void updateMetadata(String trackTitle, String artist, String album, BitmapDrawable albumImage) {
-            MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder()
-                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
-                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
-                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, trackTitle)
-                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1);
-            if (albumImage != null) {
-                metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, albumImage.getBitmap());
-            }
-            mediaSession.setMetadata(metadataBuilder.build());
-            mediaSession.setActive(true);
-
-            // Put the service in the foreground, post notification
-            Helpers.createStopNotification(mediaSession, MediaRecorderService.this, MediaRecorderService.class, NOTIFICATION_ID);
-
-            // currently, only way to update Cast metadata is to re-send URL which causes reload of stream
-            //castMedia(trackTitle, artist, album, imageUrl);
+    public void updateMetadata(String trackTitle, String artist, String album, BitmapDrawable albumImage) {
+        MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, trackTitle)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1);
+        if (albumImage != null) {
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, albumImage.getBitmap());
         }
+        mediaSession.setMetadata(metadataBuilder.build());
+        mediaSession.setActive(true);
 
-        public void loadAndDisplayCoverArt(String coverArtUrl, ImageView imageView) {
-            if (musicRecognition) {
-                musicRecognizer.loadAndDisplayCoverArt(coverArtUrl, imageView);
-            }
-        }
+        // Put the service in the foreground, post notification
+        Helpers.createStopNotification(mediaSession, MediaRecorderService.this, MediaRecorderService.class, NOTIFICATION_ID);
+
+        // currently, only way to update Cast metadata is to re-send URL which causes reload of stream
+        //castMedia(trackTitle, artist, album, imageUrl);
     }
 
     @Override
@@ -146,7 +134,7 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
         mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
                         MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
 
-        // Set an initial PlaybackState with ACTION_PLAY, so media buttons can start the player
+        // Set an initial PlaybackState with ACTION_PLAY, so media buttons can startListeningThread the player
         stateBuilder = new PlaybackStateCompat.Builder()
                 .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PLAY_PAUSE);
         mediaSession.setPlaybackState(stateBuilder.build());
@@ -174,7 +162,7 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
 
         if (requestType != null && requestType.equals(MediaRecorderService.REQUEST_TYPE_START)) {
             Log.i(TAG, "Started service");
-            // After binding with activity, will hear setActivity() to start recording
+            // After binding with activity, will hear setActivity() to startListeningThread recording
         }
         else if (requestType != null && requestType.equals(MediaRecorderService.REQUEST_TYPE_STOP)) {
             stop();
@@ -199,11 +187,15 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
 
     private void start() {
         Log.i(TAG, "Start");
+        updateMetadata(null, null, null, null);
         startRecording();
         startHttpServer();
-        if (musicRecognition) {
-            startMusicRecognition();
-        }
+        listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+            @Override
+            public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                mediaRecorderServviceListener.start();
+            }
+        });
         castMedia();
         mediaSession.setPlaybackState(new PlaybackStateCompat.Builder()
                 .setState(PlaybackStateCompat.STATE_PLAYING, 0, 0.0f)
@@ -233,9 +225,12 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
                 .setState(PlaybackStateCompat.STATE_STOPPED, 0, 0.0f)
                 .setActions(PlaybackStateCompat.ACTION_PLAY).build());
         mediaSession.setActive(false);
-        if (musicRecognition) {
-            stopMusicRecognition();
-        }
+        listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+            @Override
+            public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                mediaRecorderServviceListener.stop();
+            }
+        });
         stopRecording();
         stopHttpServer();
         stopForeground(true);
@@ -243,11 +238,7 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
     }
 
     private void startRecording() {
-        if (musicRecognition) {
-            audioRecordTask = new AudioRecordTask(musicRecognizer.getGnMusicIdStream());
-        } else {
-            audioRecordTask = new AudioRecordTask();
-        }
+        audioRecordTask = new AudioRecordTask(listeners);
         ConvertAudioTask convertAudioTask = new ConvertAudioTask();
 
         convertedAudioInputStream = convertAudioTask.getConvertedInputStream(
@@ -286,20 +277,6 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
         if (server != null) {
             server.stop();
         }
-    }
-
-    private void startMusicRecognition() {
-        musicRecognizerTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                musicRecognizer.start();
-            }
-        }, 0, MUSIC_RECOGNIZE_INTERVAL);
-    }
-
-    private void stopMusicRecognition() {
-        musicRecognizer.stop();
-        musicRecognizerTimer.cancel();
     }
 
     private class SessionManagerListenerImpl implements SessionManagerListener {

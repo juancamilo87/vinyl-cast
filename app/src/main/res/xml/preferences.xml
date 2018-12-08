@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:title="Preferences">
+
+    <PreferenceCategory
+        android:title="Music Recognition">
+
+        <SwitchPreference
+            android:key="music_recognition"
+            android:title="Music recognition"
+            android:summary="Enables Gracenote recognition"
+            android:icon="@drawable/ic_music_note_black_24dp"
+            android:enabled="false"/>
+
+        <!-- The visual style of a child is defined by this styled theme attribute. -->
+        <EditTextPreference
+            android:key="gracenote_client_id"
+            android:dependency="music_recognition"
+            android:layout="?android:attr/preferenceLayoutChild"
+            android:title="Client id"
+            android:summary="Client id for the Gracenote license"
+            android:dialogTitle="Gracenote Client Id" />
+        <EditTextPreference
+            android:key="gracenote_client_tag"
+            android:dependency="music_recognition"
+            android:layout="?android:attr/preferenceLayoutChild"
+            android:title="Client tag"
+            android:summary="Client tag for the Gracenote license"
+            android:dialogTitle="Gracenote Client Tag" />
+    </PreferenceCategory>
+</PreferenceScreen>

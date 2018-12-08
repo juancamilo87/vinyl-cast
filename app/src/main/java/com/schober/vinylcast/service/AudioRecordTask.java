@@ -3,17 +3,17 @@ package com.schober.vinylcast.service;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
-import android.os.Process;
 import android.util.Log;
 
-import com.gracenote.gnsdk.GnException;
-import com.gracenote.gnsdk.GnMusicIdStream;
+import com.schober.vinylcast.MediaRecorderServiceListener;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Runnable that handles saving raw PCM audio data to an input stream.
@@ -38,13 +38,9 @@ public class AudioRecordTask implements Runnable {
     private PipedOutputStream rawAudioOutputStream;
     private PipedInputStream rawAudioInputStream;
 
-    private PipedOutputStream musicDetectOutputStream;
-    private PipedInputStream musicDetectInputStream;
-    private GnMusicIdStream musicIdStream;
-    private Thread musicDetectThread;
-    private boolean musicRecognition = false;
+    private List<MediaRecorderServiceListener> listeners;
 
-    public AudioRecordTask() {
+    public AudioRecordTask(List<MediaRecorderServiceListener> listeners) {
         Log.d(TAG, "AudioRecordTask - BufferSize: " + MIN_RAW_BUFFER_SIZE);
 
         this.audioRecord = new AudioRecord(
@@ -54,21 +50,15 @@ public class AudioRecordTask implements Runnable {
                 AudioFormat.ENCODING_PCM_16BIT,
                 MIN_RAW_BUFFER_SIZE);
 
-    }
+        this.listeners = listeners;
 
-    public AudioRecordTask(GnMusicIdStream musicIdStream) {
-        musicRecognition = true;
-        Log.d(TAG, "AudioRecordTask - BufferSize: " + MIN_RAW_BUFFER_SIZE);
-        this.musicIdStream = musicIdStream;
-
-        this.audioRecord = new AudioRecord(
-                AUDIO_SOURCE,
-                AUDIO_SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_STEREO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                MIN_RAW_BUFFER_SIZE);
-
-        this.musicDetectThread = new Thread(new MusicDetectRunnable(), "MusicDetect");
+        listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+            @Override
+            public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                mediaRecorderServviceListener.createThread(AUDIO_SAMPLE_RATE, AUDIO_BIT_DEPTH,
+                        AUDIO_CHANNEL_COUNT, MIN_RAW_BUFFER_SIZE);
+            }
+        });
     }
 
     /**
@@ -79,10 +69,12 @@ public class AudioRecordTask implements Runnable {
         try {
             this.rawAudioInputStream = new PipedInputStream(MIN_RAW_BUFFER_SIZE);
             this.rawAudioOutputStream = new PipedOutputStream(rawAudioInputStream);
-            if (musicRecognition) {
-                this.musicDetectInputStream = new PipedInputStream(MIN_RAW_BUFFER_SIZE);
-                this.musicDetectOutputStream = new PipedOutputStream(musicDetectInputStream);
-            }
+            listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+                @Override
+                public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                    mediaRecorderServviceListener.getRawAudioInputStream(MIN_RAW_BUFFER_SIZE);
+                }
+            });
 
             return this.rawAudioInputStream;
         } catch (IOException e) {
@@ -104,98 +96,56 @@ public class AudioRecordTask implements Runnable {
         Log.d(TAG, "starting...");
 
         audioRecord.startRecording();
-        if (musicRecognition) {
-            musicDetectThread.start();
-        }
-
-        byte[] buffer = new byte[MIN_RAW_BUFFER_SIZE];
-        if (musicRecognition) {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    int bufferReadResult = audioRecord.read(buffer, 0, buffer.length);
-                    if (bufferReadResult > 0) {
-                        rawAudioOutputStream.write(buffer, 0, bufferReadResult);
-                        rawAudioOutputStream.flush();
-                    musicDetectOutputStream.write(buffer, 0, bufferReadResult);
-                    musicDetectOutputStream.flush();
-                    }
-                } catch (InterruptedIOException e) {
-                    Log.d(TAG, "interrupted");
-                    break;
-                } catch (IOException e) {
-                    Log.e(TAG, "Exception writing audio output", e);
-                    break;
-                }
+        listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+            @Override
+            public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                mediaRecorderServviceListener.startListeningThread();
             }
-        } else {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    int bufferReadResult = audioRecord.read(buffer, 0, buffer.length);
-                    if (bufferReadResult > 0) {
-                        rawAudioOutputStream.write(buffer, 0, bufferReadResult);
-                        rawAudioOutputStream.flush();
-                    }
-                } catch (InterruptedIOException e) {
-                    Log.d(TAG, "interrupted");
-                    break;
-                } catch (IOException e) {
-                    Log.e(TAG, "Exception writing audio output", e);
-                    break;
+        });
+
+        final byte[] buffer = new byte[MIN_RAW_BUFFER_SIZE];
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                final int bufferReadResult = audioRecord.read(buffer, 0, buffer.length);
+                if (bufferReadResult > 0) {
+                    rawAudioOutputStream.write(buffer, 0, bufferReadResult);
+                    rawAudioOutputStream.flush();
+                    listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+                        @Override
+                        public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                            mediaRecorderServviceListener.newData(buffer, 0,
+                                    bufferReadResult);
+                        }
+                    });
                 }
+            } catch (InterruptedIOException e) {
+                Log.d(TAG, "interrupted");
+                break;
+            } catch (IOException e) {
+                Log.e(TAG, "Exception writing audio output", e);
+                break;
             }
         }
 
         Log.d(TAG, "stopping...");
-        if (musicRecognition) {
-            if (musicDetectThread != null) {
-                musicDetectThread.interrupt();
+        listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+            @Override
+            public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                mediaRecorderServviceListener.interrupt();
             }
-        }
+        });
         audioRecord.stop();
         audioRecord.release();
         try {
             rawAudioOutputStream.close();
-            if (musicRecognition) {
-                musicDetectOutputStream.close();
-            }
+            listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
+                @Override
+                public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
+                    mediaRecorderServviceListener.close();
+                }
+            });
         } catch (IOException e) {
             Log.e(TAG, "Exception closing streams", e);
-        }
-    }
-
-    class MusicDetectRunnable implements Runnable {
-        private static final String TAG = "MusicDetectRunnable";
-
-        public MusicDetectRunnable() {
-            try {
-                musicIdStream.audioProcessStart(AUDIO_SAMPLE_RATE, AUDIO_BIT_DEPTH, AUDIO_CHANNEL_COUNT);
-            } catch (GnException e) {
-                Log.e(TAG, "Exception starting gracenote id", e);
-            }
-        }
-
-        @Override
-        public void run() {
-            Log.d(TAG, "starting...");
-            Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND);
-
-            byte[] buffer = new byte[MIN_RAW_BUFFER_SIZE];
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    int bufferReadResult = musicDetectInputStream.read(buffer, 0, buffer.length);
-                    musicIdStream.audioProcess(buffer, bufferReadResult);
-                } catch (GnException | IOException e) {
-                    Log.e(TAG, "Exception writing music detect output", e);
-                    break;
-                }
-            }
-
-            Log.d(TAG, "stopping...");
-            try {
-                musicIdStream.audioProcessStop();
-            } catch (GnException e) {
-                Log.e(TAG, "Exception closing streams", e);
-            }
         }
     }
 }

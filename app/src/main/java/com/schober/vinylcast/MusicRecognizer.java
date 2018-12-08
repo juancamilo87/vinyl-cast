@@ -6,8 +6,8 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Process;
 import android.os.SystemClock;
+import android.preference.PreferenceManager;
 import android.util.Log;
-import android.widget.ImageView;
 
 import com.gracenote.gnsdk.GnAlbum;
 import com.gracenote.gnsdk.GnAlbumIterator;
@@ -15,6 +15,7 @@ import com.gracenote.gnsdk.GnAssetFetch;
 import com.gracenote.gnsdk.GnDescriptor;
 import com.gracenote.gnsdk.GnError;
 import com.gracenote.gnsdk.GnException;
+import com.gracenote.gnsdk.GnImageSize;
 import com.gracenote.gnsdk.GnLanguage;
 import com.gracenote.gnsdk.GnLicenseInputMode;
 import com.gracenote.gnsdk.GnList;
@@ -37,6 +38,7 @@ import com.gracenote.gnsdk.GnUserStore;
 import com.gracenote.gnsdk.IGnCancellable;
 import com.gracenote.gnsdk.IGnMusicIdStreamEvents;
 import com.gracenote.gnsdk.IGnSystemEvents;
+import com.schober.vinylcast.service.MediaRecorderService;
 import com.schober.vinylcast.utils.DatabaseAdapter;
 
 import java.io.IOException;
@@ -53,8 +55,8 @@ import java.util.List;
 public class MusicRecognizer {
     private static final String TAG = "MusicRecognizer";
 
-    private static final String GRACENOTE_CLIENT_ID = "[CLIENT_ID]";
-    private static final String GRACENOTE_CLIENT_TAG = "[CLIENT_TAG]";
+    private String GRACENOTE_CLIENT_ID = "[CLIENT_ID]";
+    private String GRACENOTE_CLIENT_TAG = "[CLIENT_TAG]";
     private static final String GRACENOTE_LICENSE_FILENAME = "license.txt";	// app expects this file as an "asset"
     private static final String GRACENOTE_APP_STRING = "Vinyl Cast";
 
@@ -67,16 +69,22 @@ public class MusicRecognizer {
     // store some tracking info about the most recent MusicID-Stream lookup
     protected volatile boolean lastLookup_local	= false;	// indicates whether the match came from local storage
     protected volatile long lastLookup_matchTime = 0;  		// total lookup time for query
-    private volatile long lastLookup_startTime;  			// start time of query
+    private volatile long lastLookup_startTime;  			// startListeningThread time of query
     private volatile boolean audioProcessingStarted = false;
 
     private String lastTrackUid;
 
+    private MediaRecorderService service;
     private Context context;
     private MainActivity activity;
 
-    public MusicRecognizer(Context context, MainActivity activity) {
-        this.context = context;
+    private String currentAlbumTitle;
+    private String currentTrackTitle;
+    private String currentArtist;
+
+    public MusicRecognizer(MediaRecorderService service, MainActivity activity) {
+        this.service = service;
+        this.context = service;
         this.activity = activity;
         initialize();
     }
@@ -119,6 +127,10 @@ public class MusicRecognizer {
 
     private void initialize() {
         // check the client id and tag have been set
+        GRACENOTE_CLIENT_ID = PreferenceManager.getDefaultSharedPreferences(context)
+                .getString("gracenote_client_id", null);
+        GRACENOTE_CLIENT_TAG = PreferenceManager.getDefaultSharedPreferences(context)
+                .getString("gracenote_client_tag", null);
         if ( (GRACENOTE_CLIENT_ID == null) || (GRACENOTE_CLIENT_TAG == null) ){
             Log.e(TAG, "Please set Client ID and Client Tag");
             return;
@@ -413,7 +425,7 @@ public class MusicRecognizer {
                         GnTrack matchedTrack = matchedAlbum.trackMatched();
                         if (!matchedTrack.gnUId().equals(lastTrackUid)) {
                             lastTrackUid = matchedTrack.gnUId();
-                            activity.updateMetaDataFields(matchedAlbum);
+                            updateMetaDataFields(matchedAlbum);
                             trackChanges(albumsResult);
                         }
                     }
@@ -423,23 +435,49 @@ public class MusicRecognizer {
                 return;
             }
         }
+
+        private void updateMetaDataFields(GnAlbum album) {
+            if (album == null) {
+                activity.clearMetadata();
+            } else {
+                String trackTitle = "";
+                if (album.trackMatched() != null) {
+                    trackTitle = album.trackMatched().title().display();
+                }
+                String albumTitle = album.title().display();
+                String artist = album.trackMatched().artist().name().display();
+                //use album artist if track artist not available
+                if (artist.isEmpty()) {
+                    artist = album.artist().name().display();
+                }
+
+                currentAlbumTitle = albumTitle;
+                currentTrackTitle = trackTitle;
+                currentArtist = artist;
+
+                activity.updateMetaDataFields(albumTitle, trackTitle, artist);
+
+                String coverArtUrl = album.coverArt().asset(GnImageSize.kImageSizeSmall).url();
+
+                service.updateMetadata(trackTitle, albumTitle, artist, null);
+                loadAndDisplayCoverArt(coverArtUrl);
+            }
+        }
     }
 
     /**
      * Helpers to load and set cover art image in the application display
      */
-    public void loadAndDisplayCoverArt(String coverArtUrl, ImageView imageView) {
-        Thread runThread = new Thread(new CoverArtLoaderRunnable(coverArtUrl, imageView), "CoverArtLoader");
+    public void loadAndDisplayCoverArt(String coverArtUrl) {
+        Thread runThread = new Thread(new CoverArtLoaderRunnable(coverArtUrl), "CoverArtLoader");
         runThread.start();
     }
 
     class CoverArtLoaderRunnable implements Runnable {
         String coverArtUrl;
-        ImageView imageView;
 
-        CoverArtLoaderRunnable(String coverArtUrl, ImageView imageView) {
+        CoverArtLoaderRunnable(String coverArtUrl) {
             this.coverArtUrl = coverArtUrl;
-            this.imageView = imageView;
         }
 
         @Override
@@ -458,9 +496,11 @@ public class MusicRecognizer {
             }
 
             if (coverArt != null) {
-                activity.setCoverArt(coverArt, imageView);
+                activity.setCoverArt(coverArt);
+                service.updateMetadata(currentTrackTitle, currentArtist, currentAlbumTitle,
+                        (BitmapDrawable) coverArt);
             } else {
-                activity.setCoverArt(context.getResources().getDrawable(R.drawable.no_album_image), imageView);
+                activity.setCoverArt(context.getResources().getDrawable(R.drawable.no_album_image));
             }
         }
     }
