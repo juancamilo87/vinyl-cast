@@ -18,6 +18,7 @@ import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 
 import com.google.android.gms.cast.MediaInfo;
+import com.google.android.gms.cast.MediaLoadOptions;
 import com.google.android.gms.cast.MediaMetadata;
 import com.google.android.gms.cast.framework.CastContext;
 import com.google.android.gms.cast.framework.CastSession;
@@ -192,8 +193,8 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
         startHttpServer();
         listeners.forEach(new Consumer<MediaRecorderServiceListener>() {
             @Override
-            public void accept(MediaRecorderServiceListener mediaRecorderServviceListener) {
-                mediaRecorderServviceListener.start();
+            public void accept(MediaRecorderServiceListener mediaRecorderServiceListener) {
+                mediaRecorderServiceListener.start();
             }
         });
         castMedia();
@@ -208,6 +209,9 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
         if (castSession != null) {
             MediaMetadata audioMetadata = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK);
             String url = "http://" + Helpers.getIpAddress(MediaRecorderService.this) + ":" + StreamHttpServer.HTTP_SERVER_PORT + StreamHttpServer.HTTP_SERVER_URL_PATH;
+            // Any stream is slow the next one is not
+            // String url = "http://stream.expres.sk:8000/128.mp3";
+
             MediaInfo mediaInfo = new MediaInfo.Builder(url)
                     .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
                     .setContentType("audio/aac")
@@ -215,7 +219,11 @@ public class MediaRecorderService extends MediaBrowserServiceCompat {
                     .build();
             Log.d(TAG, "MediaInfo: " + mediaInfo);
             RemoteMediaClient remoteMediaClient = castSession.getRemoteMediaClient();
-            remoteMediaClient.load(mediaInfo);
+
+            MediaLoadOptions mediaLoadOptions = new MediaLoadOptions.Builder()
+                    .setAutoplay(true)
+                    .build();
+            remoteMediaClient.load(mediaInfo, mediaLoadOptions);
         }
     }
 
